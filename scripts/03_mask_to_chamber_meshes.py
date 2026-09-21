@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import SimpleITK as sitk
 import vtk
-from vtk.util import numpy_support
+from vtkmodules.util import numpy_support
 
 
 def keep_largest_component(binary_arr: np.ndarray) -> np.ndarray:

@@ -1,0 +1,38 @@
+# imaging data and nnU-Net working directories — never commit patient data
+data/nnUNet_raw/**
+data/nnUNet_preprocessed/**
+data/nnUNet_results/**
+!data/nnUNet_raw/.gitkeep
+!data/nnUNet_preprocessed/.gitkeep
+!data/nnUNet_results/.gitkeep
+
+# large model weights / checkpoints
+*.pth
+*.pt
+*.ckpt
+*.npz
+*.npy
+
+# common imaging formats — keep code, not data, in this repo
+*.nii
+*.nii.gz
+*.dcm
+*.mha
+*.mhd
+*.raw
+*.stl
+*.vtk
+*.vtp
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

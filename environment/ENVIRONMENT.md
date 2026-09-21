@@ -71,7 +71,7 @@ Check `src/config.yaml` before first use — in particular the `Segmentation` bl
 
 | Script | Env |
 |---|---|
-| `scripts/00_dicom_to_nifti.py` | env 1 (SimpleITK/pydicom — add if missing: `uv pip install SimpleITK pydicom`) |
+| `scripts/DICOM_to_NIfTI.py` | env 1 (SimpleITK/pydicom — add if missing: `uv pip install SimpleITK pydicom`) |
 | `scripts/01_make_right_heart_dataset_json.py` | env 1 |
 | `scripts/02_run_inference_right_heart.py` | env 1 (calls `nnUNetv2_predict` under the hood) |
 | `scripts/03_mask_to_chamber_meshes.py` | env 1 (add: `uv pip install vtk trimesh`) |

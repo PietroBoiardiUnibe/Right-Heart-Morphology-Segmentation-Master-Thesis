@@ -6,9 +6,9 @@ label indices CCT-FM/nnUZoo's pretrained Dataset051_CT_Cardio_FULL_Organs model 
 trained with (see nnUZoo README / CCT-FM model_training_and_benchmarks/README.md).
 
 Two uses:
-  1. Inference only: you don't need this at all — nnUNetv2_predict with the pretrained
+  1. Inference only: don't need this at all — nnUNetv2_predict with the pretrained
      checkpoint reproduces all 14 labels regardless of what you ultimately keep.
-  2. Fine-tuning on your own annotated right-heart cohort: this script writes a
+  2. Fine-tuning on specific annotated right-heart cohort: this script writes a
      dataset.json restricted to the structures actually annotated (by default RA + RV,
      extend as needed), consistent with the source model's label naming so that
      `-pretrained_weights` transfer (matching keys/shapes) still lines up.

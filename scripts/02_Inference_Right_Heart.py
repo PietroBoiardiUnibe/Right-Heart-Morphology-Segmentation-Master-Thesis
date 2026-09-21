@@ -35,3 +35,34 @@ def run_nnunet_predict(input_dir: Path, output_dir: Path, model_dir: Path, fold:
         "-m",str(model_dir),
         "-f",fold
     ]
+    print("Running:"," ".join(cmd))
+    subprocess.run(cmd,check=True)
+
+def extract_right_heart_mask(full_mask_path: Path, out_path: Path) -> None:
+    seg = sitk.ReadImage(str(full_mask_path))
+    arr=sitk.GetArrayFromImage(seg)
+    right_heart=np.zeros_like(arr)
+
+    for i,(name,label_id) in enumerate(RIGHT_HEART_LABEL_IDS.items(),start=1):
+        right_heart[arr==label_id]=i
+        print(f"  label {i} <- '{name}' (source id {label_id}), voxel count = {(arr==label_id).sum()}")
+    out_img=sitk.GetImageFromArray(right_heart)
+    out_img.CopyInformation(seg)
+    out_path.parent.mkdir(parents=True,exist_ok=True)
+    sitk.WriteImage(out_img,str(out_path))
+    print(f"Wrote right-heart-only mask to {out_path}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input_dir", type=Path, required=True, help="Folder of *_0000.nii.gz CT volumes")
+    parser.add_argument("--output_dir", type=Path, required=True, help="Where full 14-label predictions go")
+    parser.add_argument("--model_dir", type=Path, required=True, help="Pretrained CCT-FM model folder")
+    parser.add_argument("--fold", type=str, default="0")
+    parser.add_argument("--right_heart_out_dir", type=Path, required=True)
+    args = parser.parse_args()
+
+    run_nnunet_predict(args.input_dir,args.output_dir,args.model_dir,args.fold)
+
+    for full_mask in sorted(args.output.glob("*.nii.gz")):
+        rh_out=args.right_heart_out_dir/full_mask.name
+        extract_right_heart_mask(full_mask,rh_out)

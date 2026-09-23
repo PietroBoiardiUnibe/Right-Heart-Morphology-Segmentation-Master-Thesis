@@ -63,6 +63,6 @@ if __name__ == "__main__":
 
     run_nnunet_predict(args.input_dir,args.output_dir,args.model_dir,args.fold)
 
-    for full_mask in sorted(args.output.glob("*.nii.gz")):
+    for full_mask in sorted(args.output_dir.glob("*.nii.gz")):
         rh_out=args.right_heart_out_dir/full_mask.name
         extract_right_heart_mask(full_mask,rh_out)

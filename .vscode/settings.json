@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\boiar\\OneDrive - Universitaet Bern\\Master Thesis Pietro\\Code\\nnUZoo\\.venv\\Scripts\\python.exe",
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:venv",
+      "packageManager": "ms-python.python:pip"
+    }
+  ]
+}

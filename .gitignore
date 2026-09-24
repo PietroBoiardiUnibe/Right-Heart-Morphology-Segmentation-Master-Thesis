@@ -6,6 +6,14 @@ data/nnUNet_results/**
 !data/nnUNet_preprocessed/.gitkeep
 !data/nnUNet_results/.gitkeep
 
+# raw DICOM exports (may contain extension-less files like DICOMDIR) and all derived per-case outputs
+data/dicom_raw/**
+!data/dicom_raw/.gitkeep
+data/inference_input/
+data/inference_staging/
+data/predictions_full/
+data/predictions_right_heart/
+
 # large model weights / checkpoints
 *.pth
 *.pt

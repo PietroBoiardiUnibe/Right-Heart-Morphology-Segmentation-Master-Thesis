@@ -33,7 +33,7 @@ def convert_series(dicom_dir:Path,out_path:Path,target_spacing=(1.0,1.0,1.0))->N
     series_ids=reader.GetGDCMSeriesIDs(str(dicom_dir))
     if not series_ids:
         raise RuntimeError(f"No DICOM series found in {dicom_dir}")
-    file_names=reader.GetG(str(dicom_dir),series_ids[0])
+    file_names=reader.GetGDCMSeriesFileNames(str(dicom_dir),series_ids[0])
     reader.SetFileNames(file_names)
     image=reader.Execute()
 

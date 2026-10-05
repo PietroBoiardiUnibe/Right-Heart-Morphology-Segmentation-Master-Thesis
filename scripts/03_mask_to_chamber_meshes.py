@@ -38,6 +38,16 @@ def keep_largest_component(binary_arr: np.ndarray) -> np.ndarray:
     largest = sitk.GetArrayFromImage(relabeled) == 1
     return largest.astype(np.uint8)
 
+def fill_cavities(binary_arr: np.ndarray)-> np.ndarray:
+    """
+    Function tof ill background cavities which are fully enclosed by the chamber
+    (isolated voxels inside blood pool). Marching cubes algorithm would otherwise
+    wrap each cavity in its own tiny inner surface, yielding multi-component mesh
+    that SSM grooming rejects. Topological adjustment.
+    """
+    filled=sitk.BinaryFillhole(sitk.GetImageFromArray(binary_arr.astype(np.uint8)))
+    return sitk.GetArrayFromImage(filled).astype(np.uint8)
+
 
 def numpy_mask_to_vtk_image(mask: np.ndarray, spacing, origin) -> vtk.vtkImageData:
     vtk_img = vtk.vtkImageData()
@@ -72,6 +82,7 @@ def mask_to_smoothed_surface(mask: np.ndarray, spacing, origin, smoothing_iterat
     normals = vtk.vtkPolyDataNormals()
     normals.SetInputConnection(smoother.GetOutputPort())
     normals.ConsistencyOn()
+    normals.AutoOrientNormalsOn() #all triangles should be OUTWARD facing with their normals
     normals.SplittingOff()
     normals.Update()
 
@@ -82,6 +93,7 @@ def write_stl(poly_data: vtk.vtkPolyData, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     writer = vtk.vtkSTLWriter()
     writer.SetFileName(str(out_path))
+    writer.SetFileTypeToBinary()  # ~6x smaller than ASCII, same geometry - to evaluate
     writer.SetInputData(poly_data)
     writer.Write()
     print(f"Wrote {out_path}")
@@ -95,6 +107,7 @@ def process_label(mask_nifti_path: Path, label_id: int, out_stl_path: Path, smoo
         raise ValueError(f"Label {label_id} not present in {mask_nifti_path}")
 
     binary = keep_largest_component(binary)
+    binary=fill_cavities(binary) #removing enclosed cavities
     surface = mask_to_smoothed_surface(binary, seg.GetSpacing(), seg.GetOrigin(), smoothing_iterations)
     write_stl(surface, out_stl_path)
 

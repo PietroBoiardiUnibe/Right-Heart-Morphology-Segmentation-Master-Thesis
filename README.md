@@ -1,13 +1,12 @@
 # Right Heart Automated Segmentation Pipeline
 
-This folder is Pietro's own orchestration layer for the "get patient-specific right
-heart chamber meshes ready for SSM" milestone of the BPVT/TTVR thesis. It does not
-duplicate any of the external tools' code — it sits on top of them, as siblings under
+This folder is an orchestration layer for the "get patient-specific right
+heart chamber meshes ready for SSM" milestone of the BPVT/TTVR thesis. It does not duplicate any of the external tools' code — it sits on top of them, as siblings under
 `Code/`:
 
 ```
 Code/
-├── CCT-FM/            <- model training/inference/eval code (arXiv:2607.11287)
+├── CCT-FM/            <- model training/inference/eval code (arXiv:2607.11287, paper under review for the moment)
 ├── nnUZoo/             <- nnU-Net-based model zoo: CNN/Transformer/Mamba trainers, incl. the
 │                           pretrained 14-structure cardiac CT model CCT-FM is built on
 ├── CTAug/              <- cardiac-CT-specific augmentation library (metal/wire/calcification/

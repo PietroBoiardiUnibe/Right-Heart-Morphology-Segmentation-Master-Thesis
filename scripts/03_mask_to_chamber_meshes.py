@@ -55,8 +55,8 @@ def sitk_to_vtk_image(img: sitk.Image)-> vtk.vtkImageData:
     """
     arr=sitk.GetArrayFromImage(img).astype(np.float32)
     vtk_img=vtk.vtkImageData()
-    vtk_img.SetDimensions()
-    vtk_img.SetSpacing(arr.shape[::-1])
+    vtk_img.SetDimensions(arr.shape[::-1])  # numpy is (z, y, x); VTK wants (x, y, z)
+    vtk_img.SetSpacing(img.GetSpacing())
     vtk_img.SetOrigin(img.GetOrigin())
     vtk_img.GetPointData().SetScalars(
         numpy_support.numpy_to_vtk(arr.ravel(), deep=True, array_type=vtk.VTK_FLOAT))
@@ -64,7 +64,7 @@ def sitk_to_vtk_image(img: sitk.Image)-> vtk.vtkImageData:
 
 
 def mask_to_smoothed_surface(mask:np.ndarray, spacing,origin, sigma_mm:float=1.0,
-                             iso_mm:float=0.8, smoothing_iterations: int=150)-> vtk.vtkPolyData:
+                             iso_mm:float=0.8, smoothing_iterations: int=15)-> vtk.vtkPolyData:
     """Binary mask -> smooth closed surface, with all smoothing defined in MILLIMETRES so that scans of
     different voxel size give the same physical smoothing and the same triangle size:
       1. crop to the mask bounding box + margin >= 3 sigma (speed; blur never clips the border)
@@ -98,6 +98,7 @@ def mask_to_smoothed_surface(mask:np.ndarray, spacing,origin, sigma_mm:float=1.0
     largest.SetInputConnection(mc.GetOutputPort())
     largest.SetExtractionModeToLargestRegion()
     clean=vtk.vtkCleanPolyData()
+    clean.SetInputConnection(largest.GetOutputPort())
     clean.Update()
 
     smoother=vtk.vtkWindowedSincPolyDataFilter()
@@ -122,12 +123,15 @@ def mask_to_smoothed_surface(mask:np.ndarray, spacing,origin, sigma_mm:float=1.0
 
 def write_stl(poly_data: vtk.vtkPolyData, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if poly_data.GetNumberOfPoints() == 0:
+        raise ValueError(f"Empty mesh, nothing to write to {out_path}")
     writer = vtk.vtkSTLWriter()
     writer.SetFileName(str(out_path))
-    writer.SetFileTypeToBinary()  # ~6x smaller than ASCII, same geometry - to evaluate
+    writer.SetFileTypeToBinary()
     writer.SetInputData(poly_data)
-    writer.Write()
-    print(f"Wrote {out_path}")
+    if writer.Write() != 1:
+        raise IOError(f"VTK failed to write {out_path}")
+    print(f"Wrote {out_path} ({poly_data.GetNumberOfPoints()} vertices)")
 
 
 def process_label(mask_nifti_path: Path, label_id: int, out_stl_path: Path, sigma_mm: float = 1.0,

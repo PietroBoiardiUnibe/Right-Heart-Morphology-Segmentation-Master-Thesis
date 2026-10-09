@@ -2,6 +2,8 @@
 # Stage 3: pool the 5 group screens -> one cohort, apply the selection rules to the pooled
 # distribution, and write the exploratory plots (per group + cohort).
 #SBATCH --job-name=ts_select
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --account=gratis
 #SBATCH --partition=epyc2
 #SBATCH --qos=job_gratis

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Stage 4 (submit by hand after reviewing the cohort plots): veins + PA landmarks on the cohort.
 #SBATCH --job-name=ts_full
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --account=gratis
 #SBATCH --partition=gpu
 #SBATCH --qos=job_gratis

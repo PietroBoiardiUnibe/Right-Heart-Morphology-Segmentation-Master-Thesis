@@ -1,6 +1,8 @@
 #!/bin/bash
 # Stage 1: heartchambers_highres on EVERY case of all 5 ImageCAS groups (5 x 10 tasks).
 #SBATCH --job-name=ts_screen
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --account=gratis
 #SBATCH --partition=gpu
 #SBATCH --qos=job_gratis

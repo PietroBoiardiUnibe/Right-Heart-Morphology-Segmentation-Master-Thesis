@@ -1,6 +1,8 @@
 #!/bin/bash
 # Stage 2: screening table + plots, one CPU task per group.
 #SBATCH --job-name=ts_qc
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --account=gratis
 #SBATCH --partition=epyc2
 #SBATCH --qos=job_gratis

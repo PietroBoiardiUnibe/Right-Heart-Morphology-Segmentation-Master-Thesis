@@ -17,6 +17,7 @@ source "$HOME/thesis/ImageSegmentation/cluster/paths.sh"
 activate_env
 private_totalseg_config
 set -eo pipefail
+source "$HOME/thesis/ImageSegmentation/cluster/preflight.sh"     # stop at once if the environment is broken
 
 group=${IMAGECAS_GROUPS[$((SLURM_ARRAY_TASK_ID / CHUNKS_PER_GROUP))]}
 chunk=$((SLURM_ARRAY_TASK_ID % CHUNKS_PER_GROUP))

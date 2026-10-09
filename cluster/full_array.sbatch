@@ -17,6 +17,7 @@ source "$HOME/thesis/ImageSegmentation/cluster/paths.sh"
 activate_env
 private_totalseg_config
 set -eo pipefail
+source "$HOME/thesis/ImageSegmentation/cluster/preflight.sh"     # stop at once if the environment is broken
 
 python "$CODE/02b_run_totalsegmentator_batch.py" --stage full \
     --selection "$COHORT/selection.txt" --cases_dir "$CASES" \

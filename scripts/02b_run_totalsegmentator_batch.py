@@ -21,6 +21,7 @@ import json
 import random
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -109,6 +110,7 @@ if __name__ == "__main__":
     my_ids = case_ids[args.chunk::args.n_chunks]          # this task's share of the list
     print(f"chunk {args.chunk}/{args.n_chunks}: {len(my_ids)} of {len(case_ids)} cases, 7z = {SEVEN_ZIP}")
     t_start = time.time()
+    failed = []
     for i, case_id in enumerate(my_ids, 1):
         case_dir = args.cases_dir / case_dir_name(case_id)
         print(f"[{i}/{len(my_ids)}] {case_dir.name}", flush=True)
@@ -121,6 +123,11 @@ if __name__ == "__main__":
                     print(f"    {key}: {dt:.0f} s", flush=True)
         except subprocess.CalledProcessError as err:      # one bad case must not stop the batch
             print(f"    FAILED: {err}", flush=True)
-    print(f"done in {(time.time() - t_start) / 60:.1f} min")
+            failed.append(case_dir.name)
+    print(f"done in {(time.time() - t_start) / 60:.1f} min: {len(my_ids) - len(failed)} ok, {len(failed)} failed {failed}")
+    # a few bad cases are tolerated, but if half of the batch fails the cause is systematic
+    # (environment, weights, disk): exit with an error so Slurm marks the task FAILED
+    if my_ids and len(failed) >= 0.5 * len(my_ids):
+        sys.exit(1)
 
 

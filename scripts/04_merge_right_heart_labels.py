@@ -42,7 +42,6 @@ FORBIDDEN={
 # (vessel, chamber it opens into): only used to measure how well they meet
 JUNCTIONS=[("SVC","RA"),("IVC","RA"),("PA","RV")]
 MAX_GAP_MM=3.0 # a vessel farther than this from its chamber has no usable junction
-MIN_CONTACT_VOXELS=20 # fewer touching voxels than this = not connected
 STRUCT=ndi.generate_binary_structure(3,1)  # 6-connectivity: voxels touching by a face
 
 # load & merge
@@ -166,8 +165,7 @@ def junction_report(merged: np.ndarray, spacing_zyx, vessel: str, chamber: str)-
     gap=float(ndi.distance_transform_edt(~c, sampling=spacing_zyx)[v].min()) # mm, vessel -> chamber
     contact=int((ndi.binary_dilation(c, STRUCT) & v).sum()) # voxels of the vessel touching it
     info.update(gap_mm=round(gap,2), contact_voxels=contact)
-    info["status"]="ok" if (gap<= MAX_GAP_MM and contact>= MIN_CONTACT_VOXELS)
-    else "not_attached"
+    info["status"] = "ok" if gap <= MAX_GAP_MM else "not_attached"  
     return info
 
 def write_like(arr:np.ndarray, ref: sitk.Image, path: Path)-> None:

@@ -72,7 +72,8 @@ def mask_to_smoothed_surface(mask:np.ndarray, spacing,origin, sigma_mm:float=1.0
       3. linear resample onto a common isotropic grid (iso_mm)
       4. marching cubes at 0.5 (iso-level 0.5 of a blurred mask keeps the volume ~constant)
       5. keep the largest surface region (thin 1-2 voxel spikes detach after blurring)
-      6. light windowed-sinc smoothing: repairs the sliver triangles marching cubes makes on smooth fields
+      6. 
+      
     """
     img = sitk.GetImageFromArray(mask.astype(np.float32))
     img.SetSpacing(tuple(float(s) for s in spacing))

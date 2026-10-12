@@ -223,6 +223,33 @@ def page_selection(d):
     axes[1].legend(frameon=False)
     return fig, "Selection"
 
+def page_representativeness(d):
+    """
+    Does the selection criteria change the statistics of the population? Does the selection cases still look like the screened population?
+    One panel per index: cumulative distribution of included vs all screened case with the  with the Kolmogorov-Smirnov
+    p-value (small p = the selection is shifted on that index = possible selection bias)
+    """
+
+    if d.included.isna().all():
+        return None, None
+    from scipy.stats import ks_2samp
+
+    included=d.included.fillna(False).astype(bool)
+    indices=[c for c in ("vol_RA_ml", "vol_RV_ml", "vol_PA_ml", "vol_LV_ml",
+                           "phase_la_over_lv", "phase_ra_over_rv", "noise_sd_hu", "fov_xy_mm") if c in d]
+    fig, axes = plt.subplots(2, 4, figsize=(14, 6.5))
+    for ax, col in zip(axes.ravel(), indices):
+        for values, color, label in ((d[col], MUTED, f"all screened (n={len(d)})"),
+                                     (d.loc[included, col], SERIES[0], f"included (n={int(included.sum())})")):
+            v = np.sort(values.dropna().values)
+            ax.step(v, np.arange(1, len(v) + 1) / len(v), where="post", color=color, lw=1.8, label=label)
+        p = ks_2samp(d.loc[included, col].dropna(), d.loc[~included, col].dropna()).pvalue
+        ax.set_title(f"{col}   KS p = {p:.2f}", color=INK if p >= 0.05 else SERIES[1])
+        ax.set_ylabel("fraction of cases")
+    axes.ravel()[0].legend(frameon=False, fontsize=7)
+    for ax in axes.ravel()[len(indices):]:
+        ax.set_visible(False)
+    return fig, "Representativeness: included vs all screened (orange title = shifted, p < 0.05)"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -237,7 +264,7 @@ if __name__ == "__main__":
     print(f"{len(d)} cases from {d.table.nunique()} table(s): {', '.join(d.table.unique())}")
     with PdfPages(out_dir / f"explore_{args.name}.pdf") as pdf:
         for i, page in enumerate((page_image, page_volumes_hu, page_contrast, page_phase,
-                                  page_correlation, page_selection), 1):
+                                  page_correlation, page_selection, page_representativeness), 1):
             fig, title = page(d)
             if fig is None:
                 continue

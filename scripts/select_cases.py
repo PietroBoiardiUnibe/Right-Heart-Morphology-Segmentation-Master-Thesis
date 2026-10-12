@@ -28,9 +28,10 @@ import SimpleITK as sitk
 RULES={
     "pa_min_ml":10.0,
     "robust_z_max":3.0,
-    "room_mm":20.0,
+    "room_mm":15.0,
     "phase_la_lv_max":0.70,
     "tier2_cnr_min":0.5,
+    "require_tier2": True,
 }
 
 def robust_z(x:pd.Series)->pd.Series:
@@ -81,6 +82,7 @@ if __name__ == "__main__":
         "no_room_for_SVC_stub": d.room_above_RA_mm<RULES["room_mm"],
         "no_room_for_IVC_stub": d.room_below_RA_mm<RULES["room_mm"],
         "phase_outside_band":d.phase_la_over_lv>RULES["phase_la_lv_max"],
+        "contrast_below_tier2": (d.tier== "T3") & RULES["require_tier2"],
     }
     d["reasons"] = [";".join(name for name, failed in checks.items() if failed[i]) for i in range(len(d))]
     d["included"] = d.reasons == ""

@@ -92,6 +92,10 @@ def read_case(case_dir: Path) -> dict:
     surface = case_dir / "surface_qc.json"
     if surface.exists():
         s = json.loads(surface.read_text())
+        row["surface_included"] = s["included"]
+        if "vertices" not in s:                           # 06 stopped before meshing (an opening is missing)
+            row["mesh_problems"] = ";".join(s["problems"])
+            return row
         row.update({"mesh_vertices": s["vertices"], "mesh_edge_mm": s["edge_mm_mean"], "mesh_min_angle_deg": s["min_angle_deg"],
                     "mesh_max_valence": s["max_valence"], "mesh_volume_ml": s["volume_ml"],
                     "mesh_self_intersections": s["self_intersecting_faces"], "mesh_problems": ";".join(s["problems"])})

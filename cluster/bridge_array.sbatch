@@ -8,13 +8,13 @@
 #SBATCH --partition=epyc2
 #SBATCH --qos=job_gratis
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=24G
+#SBATCH --mem-per-cpu=12G
 #SBATCH --time=08:00:00
 #SBATCH --array=0-19%10
 #SBATCH --output=%x_%A_%a.out
 
 source "$HOME/thesis/ImageSegmentation/cluster/paths.sh"
-activate env
+activate_env
 set -o pipefail
 
 STEPS=${STEPS:-"04 05 06"}

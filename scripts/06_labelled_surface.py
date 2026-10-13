@@ -12,8 +12,8 @@ vertices in WORLD coordinates (mm, direction applied).
 3. caps faces within CAP_TOL_MM of an opening plane and inside its ellipse form a cap.
 (vertices are not moved; exact planarity is imposed when flow extensions are built)
 4. labels are assigned per vertex: chamber (1 RA, 2 RV), patch (0 wall, 10 SVC inlet, 11 IVC inlet, 12 RVOT outlet), TV annulus
-(1 on the band where RA meets segmented RV)
-5. Quality Check controlling closed, manifold, one piece, no self intersections, triangle quality (orthogonality, skewness), caps flat.
+(1 on the band where RA meets segmented RV, namely the tricuspid annulus region)
+5. Quality Check controlling closed, manifold, one piece, no self-intersections, triangle quality (orthogonality, skewness in acceptability ranges), caps flat.
 
 Inputs (case folder): mask_rh_cut.nii.gz, orifices.json.     Outputs: surface_rh.vtp, surface_qc.json
 """
@@ -242,7 +242,14 @@ if __name__ == "__main__":
 
     mask_img = sitk.ReadImage(str(args.case_dir / "mask_rh_cut.nii.gz"))
     openings = json.loads((args.case_dir / "orifices.json").read_text())
-
+    missing = [n for n in OPENINGS if "centre_world" not in openings[n]]
+    if missing:                                     # 05 could not build every opening: record it, do not crash
+        qc = {"included": False,
+              "problems": [f"{n}_opening:{openings[n].get('status', 'missing')}" for n in missing]}
+        (args.case_dir / "surface_qc.json").write_text(json.dumps(qc, indent=2))
+        print(f"{args.case_dir.name}: included=False {qc['problems']} (05 could not build every opening)")
+        raise SystemExit(0)
+    
     points, faces = chamber_surface(mask_img)
     points, faces = remesh(points, faces)
     faces = orient_outwards(points, faces)

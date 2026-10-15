@@ -164,12 +164,13 @@ def vein_opening(m, forbidden, spacing, img, name)-> dict:
     voxel_mm3=float(np.prod(spacing))
 
     #1 centerline axis: centres of 2 shells at fixed distance from RA (shells cut the veins
-    #cross-wise so their centres lie on its centrelines)
+    #cross-wise so their centres lie on its centerlines)
     d_ra=ndi.distance_transform_edt(~RA, sampling=spacing)
     pts,d_pts=np.argwhere(V)*spacing, d_ra[V]
     near=pts[(d_pts>=NEAR_SHELL_MM[0]) & (d_pts<=NEAR_SHELL_MM[1])]
     far=pts[(d_pts>=FAR_SHELL_MM[0]) & (d_pts<=FAR_SHELL_MM[1])]
-    touching=pts[d_pts<=1.0]
+    touch_mm= 1.0 + max(0.0, float(d_pts.min())-0.5)  # vessels that stop short of the RA: measure from their closest end
+    touching=pts[d_pts <= touch_mm]
 
     if len(near)<50 or len(far)<50 or len(touching)<5:
         return {"status":"vein_too_short_for_axis"}
@@ -244,7 +245,7 @@ def rvot_opening(m,forbidden, spacing,img,case_dir)->dict:
     info["status"] = ";".join(flags) if flags else "ok"
     return info
 
-# ---------------------------------------------------------------- 5. run one case
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case_dir", type=Path, required=True)

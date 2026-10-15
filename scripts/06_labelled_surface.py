@@ -1,21 +1,19 @@
 """
-Step 6 of the right-heart chambers pipeline to turn the cut mask into closed. labelled surface that can enter 
-downstream the SSM pipeline. Only the chambers (RA,RV with its outflow tract towards pulmonary annulus) are meshed
+Step 6 of the right-heart pipeline: closed, labelled surface of the UNCUT chambers (RA + RV with its outflow tract)
+for the SSM. Nothing is filled, trimmed or moved: the SSM sees only segmented chamber wall.
 
-The three opening are already flat in the mask (filled each one up to its plane), so here
-they are simply labelled as caps. Nothing artificial is added really as flow extensions are built later+after SSM
-directly onto synthetic shapes by growing on top of these caps.
+1. surface of the chambers of mask_rh (04): Gaussian smoothing in mm, isotropic resampling, marching cubes,
+   vertices in WORLD coordinates (mm, direction applied)
+2. isotropic remeshing to uniform triangles of TARGET_EDGE_MM, triangles turned outwards
+3. footprints = vessel entry zones, labelled on the wall (patch 10 SVC, 11 IVC, 12 RVOT): the cap at the chamber
+   tip that lies inside the vessel lumen (ellipse measured by 05 on the vessel) and faces the vessel (smoothed
+   normal within MAX_TILT_DEG of the vessel axis), grown from the tip. 05 is used as a MEASUREMENT only.
+4. per-vertex labels: chamber (1 RA, 2 RV), patch, TV annulus band (within TV_BAND_MM of both RA and RV), and the
+   smooth footprint score fp_<vessel> (<= 1 inside; its 1-isoline is the rim used later as a contour domain)
+5. QC: closed, one piece, manifold, genus 0, no self-intersections, triangle quality, every footprint present,
+   one piece with one rim
 
-1. surface chambers only, Gaussian smoothing in mm, isotropic resampling, marching cubes;
-vertices in WORLD coordinates (mm, direction applied).
-2. re-meshing via isotropic triangulation of uniform triangles of TARGET_EDGE_MM
-3. caps faces within CAP_TOL_MM of an opening plane and inside its ellipse form a cap.
-(vertices are not moved; exact planarity is imposed when flow extensions are built)
-4. labels are assigned per vertex: chamber (1 RA, 2 RV), patch (0 wall, 10 SVC inlet, 11 IVC inlet, 12 RVOT outlet), TV annulus
-(1 on the band where RA meets segmented RV, namely the tricuspid annulus region)
-5. Quality Check controlling closed, manifold, one piece, no self-intersections, triangle quality (orthogonality, skewness in acceptability ranges), caps flat.
-
-Inputs (case folder): mask_rh_cut.nii.gz, orifices.json.     Outputs: surface_rh.vtp, surface_qc.json
+Inputs (case folder): mask_rh.nii.gz, orifices.json.     Outputs: surface_chambers.vtp, surface_chambers_qc.json
 """
 
 import argparse
@@ -36,13 +34,12 @@ CHAMBERS={"RA":1,"RV":2}
 OPENINGS={"SVC":10,"IVC":11,"RVOT":12} #patch id
 SIGMA_MM=1.0 # Gaussin smoothing parameter for the chamber mask before marching cubes renders surface
 ISO_MM=0.75 #isotropic grid for marching cubes
-TARGET_EDGE_MM=1.5 #edge length for triangulation after meshing, striking a balanc
-CAP_TOL_MM=0.6 #faces this close to an opening plane (and inside its ellipse) are cap
-CAP_RIM_MM=1.0 # ellipse enlarged by this when selecting cap faces
+TARGET_EDGE_MM=1.5 #edge length for triangulation after meshing, striking a balance
 TV_BAND_MM=1.5 # vertices within this distance of both RA and RV form the annulus band to be preserved
-CAP_AREA_RANGE=(0.75,1.15)  # cap area / opening ellipse area outside this: flag
 MIN_ANGLE_DEG=15.0  # more than 0.1 % of triangle angles below this: flag (curvature QC)
-
+MAX_TILT_DEG=65.0 # wall facing the vessel: smoothed normal within this angle of the vessel axis
+NORMAL_SMOOTH_IT=3 # neighbour averaging of the vertex normals (removes triangle-scale noise)
+SCORE_SMOOTH_IT=2  # neighbour averaging of the footprint score (smooth rim)
 # surface in world coordinates (the openings in orifices.json are already in world coordinates, so the surface must be too),
 #re-mesh and then orientation check
 
@@ -83,48 +80,92 @@ def orient_outwards(points: np.ndarray, faces: np.ndarray)-> np.ndarray:
     a,b,c= points[faces[:,0]], points[faces[:,1]],points[faces[:,2]]
     return faces if np.einsum("ij,ij->i", a, np.cross(b, c)).sum() > 0 else faces[:, ::-1].copy()
 
+def vertex_normals(points,faces)->np.ndarray:
+    """Area weighted outward vertex normals (faces already orient outwards)"""
+    fn = np.cross(points[faces[:, 1]] - points[faces[:, 0]], points[faces[:, 2]] - points[faces[:, 0]])
+    vn=np.zeros_like(points)
+    for k in range(3):
+        np.add.at(vn,faces[:,k],fn)
+    return vn/np.maximum(np.linalg.norm(vn,axis=1,keepdims=True),1e-12)
 
-# caps are placed, triangles lying on the opening plane and inside its oval.
-# only largest connected group is taken
+def vertex_neighbours(faces, n_points):
+    """Sparse 0/1 matrix: vertices connected by an edge"""
+    e=np.vstack([faces[:,[0,1]],faces[:,[1,2]],faces[:,[2,0]]])
+    a = coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(n_points, n_points))
+    return ((a + a.T) > 0).astype(float).tocsr()
 
-def opening_frame(o:dict):
-    return (np.array(o["centre_world"]), np.array(o["normal_world"]),
-np.array(o["axis1_world"]), np.array(o["axis2_world"]), *o["semi_axes_mm"])
+def smooth_on_mesh(neighbours, values, iterations):
+    """Replace each value by the mean of itself and its neighbours, "iterations" times """
+    count=np.asarray(neighbours.sum(axis=1)).ravel() + 1.0
+    for _ in range(iterations):
+        values=(neighbours @ values + values)/ (count[:, None] if values.ndim==2 else count)
+    return values
 
-def largest_face_patch(faces: np.ndarray, selected: np.ndarray)-> np.ndarray:
-    """ Keep only largest group of selected faces connected through shared edges (dropping stray faces)"""
-    ids=np.nonzero(selected)[0]
-    if len(ids)==0:
-        return selected
-    sub=faces[ids] # every face edge as a sorted vertex pair; two faces sharing an edge are neighbours
-    edges=np.sort(np.vstack([sub[:,[0,1]],sub[:,[1,2]], sub[:,[2,0]]]),axis=1)
-    owner=np.tile(np.arange(len(ids)),3)
-    order=np.lexsort((edges[:,1],edges[:,0])) # identical edges end up next to each other
-    e,o=edges[order],owner[order] 
-    shared=np.all(e[1:]==e[:-1],axis=1)
-    graph = coo_matrix((np.ones(shared.sum()), (o[:-1][shared], o[1:][shared])), shape=(len(ids), len(ids)))
-    _,component=connected_components(graph, directed=False)
-    out=np.zeros_like(selected)
-    out[ids[component==np.bincount(component).argmax()]]=True
-    return out
-
-def label_caps(points, faces, openings)-> np.ndarray:
-    """ Cap faces per opening: faces within CAP_TOL_MM of the opening plane and inside its ellipse
-    (largest connected patch). Vertices are not moved as projecting them onto the plane may fold neighboring wall triangles (self intersections)
-    Cap already flat to subvoxel scale, exact planarity is imposed when flow extensions are attached"""
-    face_patch=np.zeros(len(faces),np.int32)
-    centroids=points[faces].mean(axis=1)
+def label_footprints(points,faces,openings)->tuple[np.ndarray, dict,dict]:
+    """
+    Footprint of each vessel = cap at the chamber tip facing the vessel; score per vertex
+     max(rho, tilt / MAX_TILT_DEG): rho = elliptic radius in the vessel's lumen ellipse (1 = its outline), tilt =
+    angle between the smoothed wall normal and the vessel axis. Score smoothed on the mesh; the footprint is the
+    part with score <= 1 connected to the tip (most forward wall vertex inside the ellipse)
+    """
+    neighbours=vertex_neighbours(faces,len(points))
+    normals = smooth_on_mesh(neighbours, vertex_normals(points,faces), NORMAL_SMOOTH_IT)
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    face_patch=np.zeros(len(faces), np.int32)
+    info,scores={},{}
 
     for name, pid in OPENINGS.items():
-        c,n,e1,e2,A,B=opening_frame(openings[name])
-        rel=centroids - c
-        inside= ((rel @ e1) / (A + CAP_RIM_MM)) ** 2 + ((rel @ e2) / (B + CAP_RIM_MM)) ** 2 <= 1.0
-        cap=largest_face_patch(faces, inside & (np.abs(rel @ n) <= CAP_TOL_MM))
-        face_patch[cap]=pid
-    return face_patch
+        o=openings[name]
+        if "centre_world" not in o:                               # 05 could not measure this opening
+            info[name]= {"opening": o.get("status", "missing")}
+            continue
+        c,n,e1,e2=(np.array(o[k]) for k in ("centre_world", "normal_world", "axis1_world", "axis2_world"))
+        A,B=o["semi_axes_mm"]
+        rel=points - c
+        rho=np.sqrt(((rel @ e1) / A) ** 2 + ((rel @ e2) / B) ** 2)
+        tilt=np.degrees(np.arccos(np.clip(normals @ n, -1.0, 1.0)))
+        score=smooth_on_mesh(neighbours,np.maximum(rho,tilt/MAX_TILT_DEG), SCORE_SMOOTH_IT)
+        scores[f"fp_{name}"] = score.astype(np.float32)
+        inside=score<=1.0
+        candidates=np.nonzero(inside)[0]
 
-# each vertex takes the label of nearest RA or RV voxel in the mask and the tricuspid
-# annular band is where a vertex is within 1.5 mm of both RA and RV (where the meshes will meet)
+        if len(candidates)==0:
+            info[name]={"opening": o["status"], "tip_found": False}
+            continue
+        tip=candidates[np.argmax(rel[candidates] @ n)]  # most forward wall vertex towards the vessel
+        _,component =connected_components(neighbours[inside][:,inside], directed=False)
+        keep = np.zeros(len(points), bool)
+        keep[candidates[component == component[np.searchsorted(candidates, tip)]]] = True
+        selected=keep[faces].all(axis=1) & (face_patch==0)
+        face_patch[selected]=pid
+        info[name] = {"opening": o["status"], "tip_found": True, "opening_area_mm2": round(float(np.pi * A * B), 1),
+                      "tip_beyond_plane_mm": round(float(rel[tip] @ n), 2)}
+
+    return face_patch, info, scores
+
+def boundary_loops(faces, selected)-> int:
+    """
+    Number of closed boundary curves of a face patch (a disc-like footprint has exactly 1)
+    """
+    sub=faces[selected]
+
+    if len(sub)==0:
+        return 0
+
+    edges= np.sort(np.vstack([sub[:, [0, 1]], sub[:, [1, 2]], sub[:, [2, 0]]]), axis=1)
+    uniq, count=np.unique(edges,axis=0, return_counts=True)
+    rim=uniq[count==1] # edges used by one patch face only
+
+    if len(rim)==0:
+        return 0
+
+    nodes,inv = np.unique(rim, return_inverse=True)
+    inv = inv.reshape(-1, 2)
+    graph=coo_matrix((np.ones(len(rim)), (inv[:, 0], inv[:, 1])), shape=(len(nodes), len(nodes)))
+    return int(connected_components(graph, directed=False)[0])
+
+
+
 
 def world_to_index(img:sitk.Image, points: np.ndarray)-> np.ndarray:
     """ World (x,y,z) -> voxel index (z,y,x), rounded and kept inside the image"""
@@ -145,15 +186,15 @@ def vertex_labels(points,faces,face_patch, mask_img)-> dict:
     vertex_patch=np.zeros(len(points),np.int32)
 
     for pid in OPENINGS.values():
-        vertex_patch[np.unique(faces[face_patch==pid])]=pid  # ring vertices belong to the cap
+        vertex_patch[np.unique(faces[face_patch==pid])]=pid  # rim vertices belong to the footprint
     face_chamber=np.round(chamber_of_vertex[faces].mean(axis=1)).astype(np.int32)
 
     return {"point": {"chamber": chamber_of_vertex, "patch": vertex_patch, "tv_annulus": tv},
             "cell": {"chamber": face_chamber, "patch": face_patch}}
 
-# QC : checks that keep failure modes of meshing out of SSM pipeline (folds, spikes in warping, broken caps)
+# QC : checks that keep failure modes of meshing out of SSM pipeline (folds, spikes in warping, broken footprints)
 
-def mesh_qc(points, faces, labels, openings)->dict:
+def mesh_qc(points, faces, labels, footprint_info, openings)->dict:
     ms=pymeshlab.MeshSet()
     ms.add_mesh(pymeshlab.Mesh(vertex_matrix=points,face_matrix=faces))
     topo=ms.get_topological_measures()
@@ -179,26 +220,27 @@ def mesh_qc(points, faces, labels, openings)->dict:
           "angles_below_min_pct": round(float((angles < MIN_ANGLE_DEG).mean() * 100), 3),
           "max_valence": int(np.bincount(faces.ravel()).max()),
           "volume_ml": round(float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6000.0), 2),
-          "tv_annulus_vertices": int(labels["point"]["tv_annulus"].sum()), "caps": {}}
+          "tv_annulus_vertices": int(labels["point"]["tv_annulus"].sum()), "footprints": {}}
     
+    face_vec=0.5*np.cross(b-a,c-a) #face normal x area
+
     for name, pid in OPENINGS.items():
-        c0, n, e1, e2, A, B = opening_frame(openings[name])
-        sel = labels["cell"]["patch"] == pid
-        cap_vertices = np.unique(faces[sel])
-        rim = np.intersect1d(cap_vertices, np.unique(faces[~sel]))
-        qc["caps"][name] = {"faces": int(sel.sum()),
-                            "area_ratio": round(float(face_area[sel].sum() / (np.pi * A * B)), 3),
-                            "plane_rms_mm": round(float(np.sqrt(np.mean(((points[cap_vertices] - c0) @ n) ** 2))), 3),
-                            "rim_plane_rms_mm": round(float(np.sqrt(np.mean(((points[rim] - c0) @ n) ** 2))), 3) if len(rim) else None
-        }
+        sel=labels["cell"]["patch"]==pid
+        fp={"faces": int(sel.sum()), "area_mm2": round(float(face_area[sel].sum()), 1),
+              "boundary_loops": boundary_loops(faces, sel), **footprint_info[name]}
+        if "opening_area_mm2" in fp: # footprint seen along the vessel axis vs lumen
+            n=np.array(openings[name]["normal_world"])
+            fp["projected_area_ratio"] = round(float(abs((face_vec[sel] @ n).sum()) / fp["opening_area_mm2"]), 3)
+        qc["footprints"][name]=fp
 
     checks={"not_closed":qc["boundary_edges"]>0, "several_pieces":qc["components"]!=1,
             "non_manifold": not qc["two_manifold"],"genus_not_0": qc["genus"] != 0, "self_intersections":qc["self_intersecting_faces"]>0,
             "thin_triangles":qc["angles_below_min_pct"]>0.1,"inside_out":qc["volume_ml"]<=0, "no_tv_annulus": qc["tv_annulus_vertices"] == 0
             }
 
-    for name, cap in qc["caps"].items():
-        checks[f"{name}_cap_size"]= not CAP_AREA_RANGE[0]<= cap["area_ratio"]<=CAP_AREA_RANGE[1]
+    for name, fp in qc["footprints"].items():
+        checks[f"{name}_footprint_missing"]=fp["faces"]==0
+        checks[f"{name}_footprint_not_disc"]=fp["faces"]>0 and fp["boundary_loops"]!=1
     qc["problems"] = [k for k, failed in checks.items() if failed]
     qc["included"] = not qc["problems"]
 
@@ -226,7 +268,7 @@ def write_vtp(points,faces,labels,path:Path)->None:
 
     note=vtk.vtkStringArray()
     note.SetName("description")
-    note.InsertNextValue("mm, world LPS; chamber 1 RA 2 RV; patch 0 wall 10 SVC inlet 11 IVC inlet 12 RVOT outlet; tv_annulus 0/1")
+    note.InsertNextValue("mm, world LPS; chamber 1 RA 2 RV; patch 0 wall 10 SVC 11 IVC 12 RVOT footprint (vessel entry zone on the uncut wall); tv_annulus 0/1; fp_<vessel> footprint score (rim = isoline 1)")
     poly.GetFieldData().AddArray(note)
     writer=vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(str(path))
@@ -240,30 +282,24 @@ if __name__ == "__main__":
     parser.add_argument("--case_dir", type=Path, required=True)
     args = parser.parse_args()
 
-    mask_img = sitk.ReadImage(str(args.case_dir / "mask_rh_cut.nii.gz"))
-    openings = json.loads((args.case_dir / "orifices.json").read_text())
-    missing = [n for n in OPENINGS if "centre_world" not in openings[n]]
-    if missing:                                     # 05 could not build every opening: record it, do not crash
-        qc = {"included": False,
-              "problems": [f"{n}_opening:{openings[n].get('status', 'missing')}" for n in missing]}
-        (args.case_dir / "surface_qc.json").write_text(json.dumps(qc, indent=2))
-        print(f"{args.case_dir.name}: included=False {qc['problems']} (05 could not build every opening)")
-        raise SystemExit(0)
+    mask_img = sitk.ReadImage(str(args.case_dir / "mask_rh.nii.gz"))
+    openings = json.loads((args.case_dir / "orifices.json").read_text())   # 05 used as MEASUREMENT only
     
     points, faces = chamber_surface(mask_img)
     points, faces = remesh(points, faces)
     faces = orient_outwards(points, faces)
-    face_patch = label_caps(points, faces, openings)
+    face_patch, footprint_info, scores=label_footprints(points, faces, openings)
     labels = vertex_labels(points, faces, face_patch, mask_img)
-    qc = mesh_qc(points, faces, labels, openings)
+    labels["point"].update(scores)
+    qc = mesh_qc(points, faces, labels, footprint_info, openings)
 
-    write_vtp(points, faces, labels, args.case_dir / "surface_rh.vtp")
-    (args.case_dir / "surface_qc.json").write_text(json.dumps(qc, indent=2))
+    write_vtp(points, faces, labels, args.case_dir / "surface_chambers.vtp")
+    (args.case_dir / "surface_chambers_qc.json").write_text(json.dumps(qc, indent=2))
     print(f"{args.case_dir.name}: included={qc['included']} {qc['problems']}")
     print(f"   {qc['vertices']} vertices, edge {qc['edge_mm_mean']} mm (cv {qc['edge_cv']}), min angle {qc['min_angle_deg']} deg, "
           f"max valence {qc['max_valence']}, volume {qc['volume_ml']} mL, genus {qc['genus']}, "
           f"self-intersections {qc['self_intersecting_faces']}, tv band {qc['tv_annulus_vertices']} vertices")
-    for name, cap in qc["caps"].items():
-        print(f"   {name}: {cap}")
+    for name, fp in qc["footprints"].items():
+        print(f"   {name}: {fp}")
 
     

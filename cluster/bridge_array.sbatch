@@ -19,7 +19,7 @@ set -o pipefail
 
 STEPS=${STEPS:-"04 05 06"}
 declare -A SCRIPT=([04]=04_merge_right_heart_labels.py [05]=05_cut_orifices.py [06]=06_labelled_surface.py)
-declare -A OUTPUT=([04]=mask_rh.nii.gz [05]=mask_rh_cut.nii.gz [06]=surface_rh.vtp)
+declare -A OUTPUT=([04]=mask_rh.nii.gz [05]=mask_rh_cut.nii.gz [06]=surface_chambers.vtp)
 N_TASKS=20
 
 mapfile -t ids < <(tr -d '\r' < "$COHORT/selection.txt" | grep -v '^$')

@@ -10,9 +10,12 @@ Sections
   3  surfaces (06) mesh quality, mesh vs mask volume (Bland-Altman), footprints
   4  gallery       every surface, footprints coloured; excluded / flagged cases first
   5  decision      review heatmap (robust z), review_cases.csv, ssm_candidates.txt
+  6  synthetic     (optional) QC verdict of synthetic cohorts + their visual QC pages, read from the output folders of
+                   ShapeAnalysis/scripts/synthetic_qc_report.py
 
 Usage: python qc_report.py --cases_dir C:\\data\\rh_test\\cases --selection C:\\data\\rh_test\\cohort\\selection.txt
                            [--selection_csv <pooled selection.csv with reasons>] --out_dir C:\\data\\rh_test\\qc\\report\\<date>_<label>
+                           [--synthetic_report <synthetic report folder> [<another> ...]]
 """
 import argparse
 import json
@@ -30,6 +33,8 @@ import vtk
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 import cohort_qc as cq          # read_case (04 + 05), strip, page, scatter, flag_cases, colours, flag settings
+
+plt.rcParams["figure.max_open_warning"] = 0     # pages are built first and written at the end: many open figures is expected
 
 OPENINGS = ("SVC", "IVC", "RVOT")
 SURFACE_FLAGS = {"surf_projected_ratio_SVC": "SVC footprint / lumen", "surf_projected_ratio_IVC": "IVC footprint / lumen",
@@ -236,6 +241,36 @@ def decision_page(d, z, review):
     return fig
 
 
+def synthetic_pages(report_dirs) -> list:
+    """Section 6: synthetic cohorts. Reads the OUTPUT folders of ShapeAnalysis/scripts/synthetic_qc_report.py
+    (synthetic_qc_table.csv + its PNG pages), so the two repositories stay independent. One overview page comparing
+    the runs, then every page of every run."""
+    runs = []
+    for folder in report_dirs:
+        table = pd.read_csv(folder / "synthetic_qc_table.csv")
+        accepted = table["accepted"].astype(bool)
+        problems = pd.Series([p for ps in table.problems.fillna("") for p in str(ps).split(";") if p]).value_counts()
+        runs.append({"run": f"{folder.parent.parent.name}/{folder.parent.name}", "hearts": len(table),
+                     "accepted": int(accepted.sum()), "rejected_pct": round(100 * (~accepted).mean(), 1),
+                     "failure_modes": ", ".join(f"{k} {v}" for k, v in problems.items()) or "none", "folder": folder})
+    fig, ax = cq.page("Synthetic cohorts (ShapeAnalysis 04 + 05): QC verdict per run", 1, 1, (12, 1.6 + 0.45 * len(runs)))
+    ax[0].axis("off")
+    cells = [[r["run"], r["hearts"], r["accepted"], f"{r['rejected_pct']} %", r["failure_modes"]] for r in runs]
+    tab = ax[0].table(cellText=cells, colLabels=["run", "hearts", "accepted", "rejected", "failure modes (hearts)"],
+                      loc="upper left", cellLoc="left", colWidths=[0.28, 0.07, 0.08, 0.08, 0.49])
+    tab.auto_set_font_size(False)
+    tab.set_fontsize(7)
+    figs = [fig]
+    for r in runs:
+        for png in sorted(r["folder"].glob("synthetic_qc_*.png")):
+            img = plt.imread(png)
+            fig = plt.figure(figsize=(img.shape[1] / 130, img.shape[0] / 130))
+            fig.figimage(img)
+            fig.text(0.005, 0.995, f"{r['run']}  |  {png.name}", va="top", fontsize=7, color=cq.INK2)
+            figs.append(fig)
+    return figs
+
+
 def git_commit(path: Path) -> str:
     try:
         return subprocess.run(["git", "-C", str(path), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -250,6 +285,8 @@ if __name__ == "__main__":
     parser.add_argument("--selection_csv", type=Path, default=None, help="pooled selection.csv with reasons (funnel from screening)")
     parser.add_argument("--out_dir", type=Path, required=True)
     parser.add_argument("--no_gallery", action="store_true", help="skip the surface renders (faster)")
+    parser.add_argument("--synthetic_report", type=Path, nargs="*", default=[],
+                        help="output folder(s) of ShapeAnalysis synthetic_qc_report.py: adds section 6 (synthetic cohorts)")
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -260,9 +297,11 @@ if __name__ == "__main__":
     if not args.no_gallery:
         figs += gallery_pages(d, args.cases_dir, review)
     figs.append(decision_page(d, z, review))
+    n_data_pages = len(figs)
+    figs += synthetic_pages(args.synthetic_report)
     with PdfPages(args.out_dir / "qc_report.pdf") as pdf:
         for i, fig in enumerate(figs, 1):
-            if len(fig.get_axes()) <= 6:
+            if i <= n_data_pages and len(fig.get_axes()) <= 6:
                 fig.tight_layout(rect=(0, 0, 1, 0.94))
             fig.savefig(args.out_dir / f"qc_report_{i:02d}.png", dpi=130)
             pdf.savefig(fig)
@@ -274,6 +313,7 @@ if __name__ == "__main__":
     (args.out_dir / "ssm_candidates.txt").write_text("\n".join(ssm) + "\n")
     run = {"date": str(date.today()), "cases_dir": str(args.cases_dir), "selection": str(args.selection),
            "selection_csv": str(args.selection_csv), "n_cases": len(d), "n_ssm_candidates": len(ssm),
+           "synthetic_reports": [str(p) for p in args.synthetic_report],
            "imagesegmentation_commit": git_commit(Path(__file__).resolve().parent)}
     (args.out_dir / "run.json").write_text(json.dumps(run, indent=2))
     print(f"{len(d)} cases, {len(ssm)} SSM candidates, {len(review)} to review, {len(figs)} pages -> {args.out_dir}")

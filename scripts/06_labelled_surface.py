@@ -32,9 +32,17 @@ from vtkmodules.util import numpy_support as nps
 
 CHAMBERS={"RA":1,"RV":2}
 OPENINGS={"SVC":10,"IVC":11,"RVOT":12} #patch id
-SIGMA_MM=1.0 # Gaussin smoothing parameter for the chamber mask before marching cubes renders surface
-ISO_MM=0.75 #isotropic grid for marching cubes
-TARGET_EDGE_MM=1.5 #edge length for triangulation after meshing, striking a balance
+VESSEL_LABEL={"SVC":4,"IVC":5,"RVOT":3} #label beyond each opening in mask rh (RVOT -> PA)
+FOOTPRINT_RULE="interface" # "interface": wall touching the vessel label (physician data); "tip_cap": older ellipse rule
+PROBE_MM=(0.25,0.5,0.75,1.0) # a wall vertex is touching a vessel if the label map holds it this far outside (normal)
+
+# STL-100 (physician labels, CT voxels 0.15-0.22 x 0.25 mm), fidelity test 2026-11-03: sigma 0.5 removes the staircase
+# (neighbour-triangle angle p95 9 deg vs 55 unsmoothed), volume -0.07 % vs STL, lost detail max 0.89 mm.
+# TotalSegmentator dataset used SIGMA_MM=1.0, ISO_MM=0.75, TARGET_EDGE_MM=1 (volume -0.42 %, lost detail max 1.64 mm).
+
+SIGMA_MM=0.5 # Gaussin smoothing parameter for the chamber mask before marching cubes renders surface
+ISO_MM=0.5 #isotropic grid for marching cubes
+TARGET_EDGE_MM=0.75 #edge length for triangulation after isotropic meshing, striking a balance
 TV_BAND_MM=1.5 # vertices within this distance of both RA and RV form the annulus band to be preserved
 MIN_ANGLE_DEG=15.0  # more than 0.1 % of triangle angles below this: flag (curvature QC)
 MAX_TILT_DEG=65.0 # wall facing the vessel: smoothed normal within this angle of the vessel axis
@@ -142,6 +150,64 @@ def label_footprints(points,faces,openings)->tuple[np.ndarray, dict,dict]:
                       "tip_beyond_plane_mm": round(float(rel[tip] @ n), 2)}
 
     return face_patch, info, scores
+
+#a function that labels the connected pieces of a set of faces, where two faces are connected they share an edge
+
+def face_pieces(faces,selected):
+    """connected pieces (shared edges) of the selected faces: label per face, -1 for not selected faces"""
+    idx=np.nonzero(selected)[0]
+    out=np.full(len(faces),-1)
+    if len(idx)==0:
+        return out
+    sub=faces[idx]
+    edges=np.sort(np.vstack([sub[:,[0,1]],sub[:,[1,2]],sub[:,[2,0]]]),axis=1)
+    _,inv=np.unique(edges,axis=0, return_inverse=True); inv=inv.ravel()
+    incidence=coo_matrix((np.ones(len(edges)), (inv,np.tile(np.arange(len(sub)),3))),shape=(inv.max()+1,len(sub))).tocsr()
+    out[idx]=connected_components(incidence.T@incidence,directed=False)[1]
+    return out
+
+# a function that defines the new rule to identify 3D boundary edges as the footprints' rims
+def interface_footprints(points, faces, mask_img)->tuple[np.ndarray, dict,dict]:
+    """
+    Footprint= it is derived as the chamber wall that touches the vessel label drawn by the validation of segmentations:
+    No plane or ellipse is fitted and a vertex touches the vessel v if the label map holds v just outside it (sampled along the smoothed outward normal at PROBE_MM).
+    faces with 3 touching vertices, largest piece, holes inside it filled (one disc, one rim)
+    """
+    m=sitk.GetArrayFromImage(mask_img)
+    neighbours=vertex_neighbours(faces,len(points))
+    normals=smooth_on_mesh(neighbours, vertex_normals(points,faces),NORMAL_SMOOTH_IT)
+    normals/=np.linalg.norm(normals, axis=1, keepdims=True)
+    touch={name: np.zeros(len(points), bool) for name in OPENINGS}
+
+    for t in PROBE_MM:
+        lab=m[tuple(world_to_index(mask_img, points + t*normals).T)]
+        for name in OPENINGS:
+            touch[name]|=lab==VESSEL_LABEL[name]
+    face_patch=np.zeros(len(faces),np.int32)
+    info={}
+
+    for name, pid in OPENINGS.items():
+        sel=touch[name][faces].all(axis=1) & (face_patch==0)
+        piece=face_pieces(faces,sel)
+        if (piece>=0).sum()==0:
+            info[name]={"opening":"interface","touching_vertices":int(touch[name].sum())}
+            continue
+        keep=piece==np.argmax(np.bincount(piece[piece>=0]))
+        rest=face_pieces(faces,~keep & (face_patch==0)) # wall outside the footprint
+
+        if (rest>=0).any():
+            sizes=np.bincount(rest[rest>=0])
+            keep|=(rest>=0)&(rest!=np.argmax(sizes))   # enclosed holes -> footprint
+        face_patch[keep]=pid
+        info[name]={"opening":"interface","touching_vertices":int(touch[name].sum())}
+
+    return face_patch, info, {}
+
+
+
+
+
+
 
 def boundary_loops(faces, selected)-> int:
     """
@@ -288,7 +354,13 @@ if __name__ == "__main__":
     points, faces = chamber_surface(mask_img)
     points, faces = remesh(points, faces)
     faces = orient_outwards(points, faces)
-    face_patch, footprint_info, scores=label_footprints(points, faces, openings)
+
+    if FOOTPRINT_RULE=="interface":
+        face_patch,footprint_info,scores=interface_footprints(points,faces, mask_img)
+    else:
+        face_patch, footprint_info, scores=label_footprints(points, faces, openings)
+        
+
     labels = vertex_labels(points, faces, face_patch, mask_img)
     labels["point"].update(scores)
     qc = mesh_qc(points, faces, labels, footprint_info, openings)

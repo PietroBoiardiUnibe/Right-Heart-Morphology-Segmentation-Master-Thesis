@@ -117,7 +117,7 @@ def resample(X,centre, axis, reference,k):
         multi+=len(hit)>1
         j=hit[np.argmax(t[hit])]# outermost crossing
         pts.append(X[j]+u[j]*(np.roll(X,-1,axis=0)[j] - X[j]))
-    return np.array(pts)
+    return np.array(pts), multi
 
 
 def descriptors(pts):
@@ -128,7 +128,7 @@ def descriptors(pts):
     off=(pts-c)@Vt[2]
 
     return {"rim_centroid":c.round(3).tolist(),"vector_area_mm2":round(area,1),"eq_diameter_mm":round(2*np.sqrt(area/np.pi),2),
-    "nonplanar_rms_mm": round(float(np.sqrt(np.mean(off ** 2))),2), "nonplanar_pp_m":round(float(np.ptp(off)),2)
+    "nonplanar_rms_mm": round(float(np.sqrt(np.mean(off ** 2))),2), "nonplanar_pp_mm":round(float(np.ptp(off)),2)
     }
 
 def rims_of_case(case,k_vessel, k_tv):

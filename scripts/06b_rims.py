@@ -7,7 +7,7 @@ RIM:  SVC, IVC, RVOT: boundary of the footprint patch of 06 (wall touching the v
              Ordered as one closed loop of mesh vertices (the longest loop if there were several).
 
 POINTS: the loop is smoothed along itself (moving average of WINDOW vertices, removes the mesh-edge zig-zag) and put back onto the wall.
-             Seen along the vessel axis from the opening centre, point j is where the rim crosses th direction j*360/K deg counter-clockwise from an
+             Seen along the rim's own normal vector from the opening centre, point j is where the rim crosses th direction j*360/K deg counter-clockwise from an
              anatomical reference - towards the TV centre for SVC/IVC/RVOT, towards the RVOT centre for the TV. Fixed angles about a fixed anatomical frame=
              the same point number means the same anatomical side in every heart.
 LANDMARKS: per opening: centre, tip = centre + TIP_MM x vessel axis (orientation), K rim points.
@@ -94,8 +94,8 @@ def smooth_loop(X,surface_locator, window=5):
     return out
 
 def resample(X,centre, axis, reference,k):
-    """ K rim points ar fixed angles around the opening centre: point j is where the rim, seen along the vessel axis,
-     crosses the direction rotated by j*360/K from the anatomical reference (counter-clockwise about the axis)
+    """ K rim points ar fixed angles around the opening centre: point j is where the rim, seen along the rim's own normal (axis argument),
+     crosses the direction rotated by j*360/K from the anatomical reference (counter-clockwise about that normal)
      Returns the points and the number of directions that crossed the rim more than once (0= star-shaped rim we wish to have)
     """
     ref=reference-centre; ref-=(ref@axis)*axis; ref/=np.linalg.norm(ref)
@@ -151,11 +151,16 @@ def rims_of_case(case,k_vessel, k_tv):
         found=loops(edges)
         centre,axis=np.array(o["centre_world"]),np.array(o["normal_world"])
         X=smooth_loop(P[found[0]],locator)
-        pts, multi = resample(X, centre, axis, np.array(ori[REFERENCE[name]]["centre_world"]), k_tv if name == "TV" else k_vessel)
+        g=X.mean(axis=0) #rim centroid
+        n_rim=0.5*np.cross(X-g,np.roll(X,-1,axis=0)-g).sum(axis=0)# vector area = direction the rim faces
+        n_rim/=np.linalg.norm(n_rim); n_rim*=np.sign(n_rim@axis)  # point it into the vessel, like the axis
+        pts,multi=resample(X,g,n_rim,np.array(ori[REFERENCE[name]]["centre_world"]), k_tv if name =="TV" else k_vessel)
+
         if pts is None:
             out[name]={"status":"centre_outside_rim"}; continue
         out[name] = {"status": "ok", "points": pts.round(3).tolist(), "centre": centre.round(3).tolist(),
-                     "tip": (centre + TIP_MM * axis).round(3).tolist(), "multi_crossings": int(multi),
+                     "tip": (centre + TIP_MM * axis).round(3).tolist(), "multi_crossings": int(multi), "rim_normal": n_rim.round(4).tolist(),
+                     "axis_vs_rim_deg": round(float(np.degrees(np.arccos(np.clip(n_rim @ axis / np.linalg.norm(axis), -1, 1)))), 1),
                      "perimeter_mm": round(float(np.linalg.norm(np.roll(X, -1, axis=0) - X, axis=1).sum()), 1),
                      "loops_found": len(found), "loop_vertices": int(len(found[0])), **descriptors(pts)}
     return out, (P,F,patch, ori)

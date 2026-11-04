@@ -260,6 +260,30 @@ def vertex_labels(points,faces,face_patch, mask_img)-> dict:
 
 # QC : checks that keep failure modes of meshing out of SSM pipeline (folds, spikes in warping, broken footprints)
 
+def repair_self_intersections(points,faces, rounds=5, steps=3):
+    """Local fix of remeshing folds: smooth only the self-intersecting faces and their one-ring (each vertex moves
+    halfway to the mean of its neighbours), re-check, repeat. Clean meshes are returned unchanged.
+    Returns points, number of vertices moved, largest move (mm)."""
+    e=np.vstack([faces[:,[0,1]], faces[:,[1,2]], faces[:,[2,0]]])
+    A=coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(len(points), len(points))).tocsr()
+    A=((A+A.T)>0).astype(float); deg=np.asarray(A.sum(axis=1)).ravel() #vertex neighbours
+    new=points.copy(); moved=np.zeros(len(points),bool)
+
+    for _ in range(rounds):
+        ms=pymeshlab.MeshSet(); ms.add_mesh(pymeshlab.Mesh(vertex_matrix=new, face_matrix=faces))
+        ms.compute_selection_by_self_intersections_per_face()
+        bad=ms.current_mesh().face_selection_array()
+        if not bad.any():
+            break
+        idx=np.unique(faces[np.isin(faces, np.unique(faces[bad])).any(axis=1)])  # bad faces + one ring
+        for _ in range(steps):
+            new[idx] = 0.5 * new[idx] + 0.5 * (A[idx] @ new) / deg[idx, None]
+        moved[idx]=True
+    return new, int(moved.sum()), float(np.linalg.norm(new-points, axis=1).max())
+
+
+
+
 def mesh_qc(points, faces, labels, footprint_info, openings)->dict:
     ms=pymeshlab.MeshSet()
     ms.add_mesh(pymeshlab.Mesh(vertex_matrix=points,face_matrix=faces))
@@ -354,6 +378,7 @@ if __name__ == "__main__":
     points, faces = chamber_surface(mask_img)
     points, faces = remesh(points, faces)
     faces = orient_outwards(points, faces)
+    points,n_fixed,fix_mm=repair_self_intersections(points,faces)
 
     if FOOTPRINT_RULE=="interface":
         face_patch,footprint_info,scores=interface_footprints(points,faces, mask_img)
@@ -364,6 +389,7 @@ if __name__ == "__main__":
     labels = vertex_labels(points, faces, face_patch, mask_img)
     labels["point"].update(scores)
     qc = mesh_qc(points, faces, labels, footprint_info, openings)
+    qc["repaired_vertices"],qc["repair_max_move_mm"]=n_fixed, round(fix_mm,3)
 
     write_vtp(points, faces, labels, args.case_dir / "surface_chambers.vtp")
     (args.case_dir / "surface_chambers_qc.json").write_text(json.dumps(qc, indent=2))

@@ -7,7 +7,7 @@ Row 1  the surfaces
    B  volume chain: enclosed volume of the surface (06) and of the mask (04b) against the physicians' STL volume (RA+RV)
    C  footprint area of each vessel opening (the wall patch touching the vessel label)
    D  equivalent diameter of each rim (from the vector area of the K-point loop)
-Row 2  Row 2  rim signatures: distance of rim point j from the rim centroid, seen along the rim's own normal (as 06b samples it),
+Row 2  rim signatures: distance of rim point j from the rim centroid, seen along the rim's own normal (as 06b samples it),
    against its fixed angle.  Every heart = one thin line; if the correspondence works the lines share one
    shape and differ in size. match = median leave-one-out correlation of each heart with the mean of the others
    (1 = same shape, about 0 = no correspondence).
@@ -71,7 +71,7 @@ def load_case(case):
 
 def loo_corr(M):
     """How well each heart's rim signature matches the average of all the other hearts (1 = same shape, ~0 = unrelated)"""
-    return np.array([np.corrcoef(M[i],np.delete(M,i,axis=0).mean(axis=0))[0.1] for i in range(len(M))])
+    return np.array([np.corrcoef(M[i],np.delete(M,i,axis=0).mean(axis=0))[0, 1] for i in range(len(M))])
 
 
 

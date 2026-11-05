@@ -133,7 +133,7 @@ def main():
                 ax.plot(np.append(theta, 360), np.append(v, v[0]), color=COLOURS[n], lw=0.8, alpha=0.5)
             ax.plot(np.append(theta, 360), np.append(M.mean(0), M.mean(0)[0]), color="k", lw=1.8, label="mean")
             ax.legend(fontsize=7, frameon=False)
-        ax.set_xticks(range(0, 361, 90)); ax.set_xlabel("fixed angle from the anatomical reference (deg)", fontsize=8)
+        ax.set_xticks(range(0, 361, 90)); ax.set_xlabel("fixed angle from the anchor direction (deg)", fontsize=8)
         ax.set_ylabel("distance of the rim point from the centre (mm)", fontsize=8); ax.tick_params(labelsize=7)
         match = f", match {np.median(loo_corr(np.array(list(sigs[n].values())))):+.2f}" if len(sigs[n]) > 2 else ""
         ax.set_title(f"{n} rim signature ({len(sigs[n])} hearts, K = {len(next(iter(sigs[n].values()))) if sigs[n] else 0}{match})", fontsize=9, loc="left")

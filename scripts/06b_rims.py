@@ -8,7 +8,8 @@ RIM:  SVC, IVC, RVOT: boundary of the footprint patch of 06 (wall touching the v
 
 POINTS: the loop is smoothed along itself (moving average of WINDOW vertices, removes the mesh-edge zig-zag) and put back onto the wall.
              Seen along the rim's own normal vector from the opening centre, point j is where the rim crosses th direction j*360/K deg counter-clockwise from an
-             anatomical reference - towards the TV centre for SVC/IVC/RVOT, towards the RVOT centre for the TV. Fixed angles about a fixed anatomical frame=
+             anchor: for SVC/IVC the direction the vessel leans (its axis projected into the rim plane, TILT_ANCHOR), towards the
+             TV centre for the RVOT, towards the RVOT centre for the TV. Fixed angles about a fixed anatomical frame=
              the same point number means the same anatomical side in every heart.
 LANDMARKS: per opening: centre, tip = centre + TIP_MM x vessel axis (orientation), K rim points.
 
@@ -36,6 +37,8 @@ from vtkmodules.util.numpy_support import vtk_to_numpy
 PATCH={"SVC":10,"IVC":11,"RVOT":12}
 REFERENCE={"SVC":"TV","IVC":"TV","RVOT":"TV","TV":"RVOT"}
 TIP_MM=10.0  # orientation landmark: centre + TIP_MM x vessel axis (the PCA learns the vessel direction from it)
+TILT_ANCHOR=("SVC","IVC") # caval vessels: angle 0 equals the direction the vessel leans (axis projected onto rim plane)
+MIN_TILT=0.2 # sin of the smallest usable lean (about 11.5 deg); below it the reference direction is used
 COLOURS = {"SVC": "#eb6834", "IVC": "#7a3fb0", "RVOT": "#1baf7a", "TV": "#2a78d6"}
 
 #for vessels, an edge used exactly by one footprint face only lies on the border
@@ -154,12 +157,19 @@ def rims_of_case(case,k_vessel, k_tv):
         g=X.mean(axis=0) #rim centroid
         n_rim=0.5*np.cross(X-g,np.roll(X,-1,axis=0)-g).sum(axis=0)# vector area = direction the rim faces
         n_rim/=np.linalg.norm(n_rim); n_rim*=np.sign(n_rim@axis)  # point it into the vessel, like the axis
-        pts,multi=resample(X,g,n_rim,np.array(ori[REFERENCE[name]]["centre_world"]), k_tv if name =="TV" else k_vessel)
+        anchor, ref_point="reference",np.array(ori[REFERENCE[name]]["centre_world"])
+        if name in TILT_ANCHOR:
+            tilt=axis/np.linalg.norm(axis); tilt=tilt- (tilt@n_rim)*n_rim
+            if np.linalg.norm(tilt)>MIN_TILT:
+                anchor,ref_point="tilt", g+tilt
+        pts,multi=resample(X,g,n_rim,ref_point,k_tv if name=="TV" else k_vessel)
+
 
         if pts is None:
             out[name]={"status":"centre_outside_rim"}; continue
         out[name] = {"status": "ok", "points": pts.round(3).tolist(), "centre": centre.round(3).tolist(),
                      "tip": (centre + TIP_MM * axis).round(3).tolist(), "multi_crossings": int(multi), "rim_normal": n_rim.round(4).tolist(),
+                     "anchor":anchor,
                      "axis_vs_rim_deg": round(float(np.degrees(np.arccos(np.clip(n_rim @ axis / np.linalg.norm(axis), -1, 1)))), 1),
                      "perimeter_mm": round(float(np.linalg.norm(np.roll(X, -1, axis=0) - X, axis=1).sum()), 1),
                      "loops_found": len(found), "loop_vertices": int(len(found[0])), **descriptors(pts)}

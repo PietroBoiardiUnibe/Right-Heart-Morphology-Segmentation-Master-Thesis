@@ -52,7 +52,8 @@ def figure(path, case, wall, F, patch, labels, ori, rims):
     for j, name in enumerate(names):
         r = rims[name]
         c, axis = np.array(r["rim_centroid"]), np.array(r["rim_normal"])         # view = the way 06b samples the rim
-        ref, side = frame(axis, np.array(ori["RVOT" if name == "TV" else "TV"]["centre_world"]), c)
+        ref_point=c+(np.array(r["tip"])-np.array(r["centre"])) if r["anchor"]=="tilt" else np.array(ori["RVOT" if name =="TV" else "TV"]["centre_world"])
+        ref,side=frame(axis,ref_point,c)
         star, tip = np.array(r["centre"]) - c, np.array(r["tip"]) - c            # 05b centre, orientation tip
         near = lambda X: X[np.linalg.norm(X - c, axis=1) < CROP_MM] - c
         W, L = near(P), near(points_of(labels[name])[::3])

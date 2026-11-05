@@ -1,0 +1,7 @@
+# source in every new window:  . "C:\Users\boiar\OneDrive - Universitaet Bern\Master Thesis Pietro\Code\ImageSegmentation\hpc\env.ps1"
+$code= "C:\Users\boiar\OneDrive - Universitaet Bern\Master Thesis Pietro\Code"
+$Py= "C:\Users\boiar\anaconda3\envs\shapeworks\python.exe"
+$rh= "C:\data\Inselspital_Dataset\rh100"
+$ub= "pb26a271@submit01.hpc.unibe.ch"
+Set-Location "$code\ImageSegmentation\scripts"
+Write-Host "ready: rh= $rh"
